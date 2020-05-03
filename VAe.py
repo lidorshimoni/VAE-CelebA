@@ -1,5 +1,5 @@
 # Importing necessary packages
-from __future__ import print_function
+#from __future__ import print_function
 
 import argparse
 import time
@@ -11,10 +11,14 @@ import numpy as np
 import cv2
 from tensorflow.keras.models import Model, Sequential, load_model
 from tensorflow.keras.layers import Dense, Conv2D, MaxPooling2D, Dropout, BatchNormalization, Activation, Input, Lambda, \
-    Flatten, Reshape, Conv2DTranspose
+    Flatten, Reshape, Conv2DTranspose, LeakyReLU
+from tensorflow.keras.callbacks import ModelCheckpoint
+from tensorflow.keras.optimizers import Adam
 import tensorflow.keras.backend as K
 from random import randint as r
 import glob
+from tensorflow.keras.preprocessing.image import ImageDataGenerator
+
 import gc
 import psutil
 import copy
@@ -24,20 +28,22 @@ import matplotlib.pyplot as plt
 class VAE():
     def __init__(self):
 
-        self.model_name = 'test_batchnorm'
+        self.model_name = 'testnewmodel'
         self.version = ""
         self.save_dir = self.model_name + "v" + self.version
 
-        self.data_dir = r"W:\Projects\General\FDGAN\kiryatgat-1502-fdgan-master\CelebA\img_align_celeba\img_align_celeba"
+        self.data_dir = r"W:\Projects\Done\FDGAN\kiryatgat-1502-fdgan-master\CelebA\img_align_celeba"
         self.log_dir = self.save_dir + "/logs/"
         self.sample_dir = self.save_dir + '/samples/'
         self.test_dir = self.save_dir + '/test/'
 
-        self.sample_size = 100000
+        self.sample_size = 5000
 
         self.shape = None
         self.sd_layer = None
         self.mean_layer = None
+        self.shape_before_flattening = None
+        self.decoder_output = None
         self.stride = 2
 
         # These are mean and standard deviation values obtained from the celebA dataset used for training
@@ -50,185 +56,334 @@ class VAE():
 
         self.batch_size = 64
         self.epochs = 50
-        self.input_size = 32
+        self.input_size = 128
+        self.encoder_output_dim = 200
+        self.decoder_input = Input(shape=(self.encoder_output_dim,), name='decoder_input')
         self.input_shape = (self.input_size, self.input_size, 3)
-        self.inp = Input(self.input_shape)
+        self.encoder_input = Input(shape=self.input_shape, name='encoder_input')
 
         self.data_set = CelebA(output_size=self.input_size, channel=self.input_shape[-1], sample_size=self.sample_size,
                                batch_size=self.batch_size, crop=True, filter=False, data_dir=self.data_dir,
                                ignore_image_description=True)
 
+        self.use_batch_norm = True
+        self.use_dropout = False
+        self.LOSS_FACTOR = 10000
+        self.learning_rate = 0.0005
+        self.adam_optimizer = Adam(lr=self.learning_rate)
+
         # callbacks
+        # checkpoint_vae = ModelCheckpoint(os.path.join(WEIGHTS_FOLDER, 'VAE/weights.h5'), save_weights_only=True,
+        #                                  verbose=1)
+
         # self.early_stop_callback = EarlyStopping(monitor='loss', min_delta=0.001, patience=3, mode='min', verbose=1)
-        # self.checkpoint_callback = ModelCheckpoint(save_dir + 'model_best_weights.h5', monitor='loss', verbose=1, save_best_only=True,
-        #                              mode='min', period=1)
+        self.checkpoint_callback = ModelCheckpoint(self.save_dir + 'model_best_weights.h5', monitor='loss', verbose=1,
+                                                   save_best_only=True,
+                                                   mode='min', period=1)
         # self.tensorboard_callback = keras.callbacks.TensorBoard(log_dir=log_dir)
 
-    def vae_loss(self, input_img, output):
-        # compute the average MSE error, then scale it up, ie. simply sum on all axes
-        reconstruction_loss = K.sum(K.square(output - input_img))
-        # compute the KL loss
-        kl_loss = - 0.5 * K.sum(1 + self.sd_layer - K.square(self.mean_layer) - K.square(K.exp(self.sd_layer)), axis=-1)
-        # return the average loss over all images in batch
-        total_loss = K.mean(reconstruction_loss + kl_loss)
-        return total_loss
+    # def vae_loss(self, input_img, output):
+    #     # compute the average MSE error, then scale it up, ie. simply sum on all axes
+    #     reconstruction_loss = K.sum(K.square(output - input_img))
+    #     # compute the KL loss
+    #     kl_loss = - 0.5 * K.sum(1 + self.sd_layer - K.square(self.mean_layer) - K.square(K.exp(self.sd_layer)), axis=-1)
+    #     # return the average loss over all images in batch
+    #     total_loss = K.mean(reconstruction_loss + kl_loss)
+    #     return total_loss
+
+    def kl_loss(self, y_true, y_pred):
+        kl_loss = -0.5 * K.sum(1 + self.sd_layer - K.square(self.mean_layer) - K.exp(self.sd_layer), axis=1)
+        return kl_loss
+
+    def total_loss(self, y_true, y_pred):
+        return self.LOSS_FACTOR * self.r_loss(y_true, y_pred) + self.kl_loss(y_true, y_pred)
+
+    def r_loss(self, y_true, y_pred):
+        return K.mean(K.square(y_true - y_pred), axis=[1, 2, 3])
 
     def sampler(self, layers):
         std_norm = K.random_normal(shape=(K.shape(layers[0])[0], 128), mean=0, stddev=1)
         return layers[0] + layers[1] * std_norm
 
     # Building the Encoder
+    # def build_encoder(self):
+    #     x = self.inp
+    #     x = Conv2D(32, (2, 2), strides=self.stride, activation="relu", padding="same")(x)
+    #     x = BatchNormalization()(x)
+    #
+    #     x = Conv2D(64, (2, 2), strides=self.stride, activation="relu", padding="same")(x)
+    #     x = BatchNormalization()(x)
+    #
+    #     x = Conv2D(128, (2, 2), strides=self.stride, activation="relu", padding="same")(x)
+    #     x = BatchNormalization()(x)
+    #
+    #     self.shape = K.int_shape(x)
+    #     x = Flatten()(x)
+    #
+    #     x = Dense(256, activation="relu")(x)
+    #
+    #     self.mean_layer = Dense(128, activation="relu")(x)  # should sigmoid
+    #     self.mean_layer = BatchNormalization()(self.mean_layer)
+    #
+    #     self.sd_layer = Dense(128, activation="relu")(x)  # should sigmoid
+    #     self.sd_layer = BatchNormalization()(self.sd_layer)
+    #
+    #     # latent_vector = Lambda(self.sampler)([self.mean_layer, self.sd_layer])
+    #     return Model(self.inp, [self.mean_layer, self.sd_layer], name="VAE_Encoder")
+    #
+    # # Building the decoder
+    # def build_decoder(self):
+    #     decoder_inp = Input(shape=(128,))
+    #     x = decoder_inp
+    #     x = Dense(self.shape[1] * self.shape[2] * self.shape[3], activation="relu")(x)
+    #
+    #     x = Reshape((self.shape[1], self.shape[2], self.shape[3]))(x)
+    #
+    #     x = (Conv2DTranspose(32, (3, 3), strides=self.stride, activation="relu", padding="same"))(x)
+    #     x = BatchNormalization()(x)
+    #
+    #     x = (Conv2DTranspose(16, (3, 3), strides=self.stride, activation="relu", padding="same"))(x)
+    #     x = BatchNormalization()(x)
+    #
+    #     x = (Conv2DTranspose(8, (3, 3), strides=self.stride, activation="relu", padding="same"))(x)
+    #     x = BatchNormalization()(x)
+    #
+    #     outputs = Conv2DTranspose(3, (3, 3), activation='sigmoid', padding='same', name='decoder_output')(x)
+    #     # should RELU
+    #
+    #     return Model(decoder_inp, outputs, name="VAE_Decoder")
+
     def build_encoder(self):
-        x = self.inp
-        x = Conv2D(32, (2, 2), strides=self.stride, activation="relu", padding="same")(x)
-        x = BatchNormalization()(x)
+        # Clear tensorflow session to reset layer index numbers to 0 for LeakyRelu,
+        # BatchNormalization and Dropout.
+        # Otherwise, the names of above mentioned layers in the model
+        # would be inconsistent
 
-        x = Conv2D(64, (2, 2), strides=self.stride, activation="relu", padding="same")(x)
-        x = BatchNormalization()(x)
+        # global K
+        # K.clear_session()
 
-        x = Conv2D(128, (2, 2), strides=self.stride, activation="relu", padding="same")(x)
-        x = BatchNormalization()(x)
+        conv_filters = [32, 64, 64, 64]
+        conv_kernel_size = [3, 3, 3, 3]
+        conv_strides = [2, 2, 2, 2]
 
-        self.shape = K.int_shape(x)
+        # Number of Conv layers
+        n_layers = len(conv_filters)
+
+        # Define model input
+        x = self.encoder_input
+
+        # Add convolutional layers
+        for i in range(n_layers):
+            x = Conv2D(filters=conv_filters[i],
+                       kernel_size=conv_kernel_size[i],
+                       strides=conv_strides[i],
+                       padding='same',
+                       name='encoder_conv_' + str(i)
+                       )(x)
+            if self.use_batch_norm:
+                x = BatchNormalization()(x)
+
+            x = LeakyReLU()(x)
+
+            if self.use_dropout:
+                x = Dropout(rate=0.25)(x)
+
+        # Required for reshaping latent vector while building Decoder
+        self.shape_before_flattening = K.int_shape(x)[1:]
+
         x = Flatten()(x)
 
-        x = Dense(256, activation="relu")(x)
+        self.mean_layer = Dense(self.encoder_output_dim, name='mu')(x)
+        self.sd_layer = Dense(self.encoder_output_dim, name='log_var')(x)
 
-        self.mean_layer = Dense(128, activation="relu")(x)  # should sigmoid
-        self.mean_layer = BatchNormalization()(self.mean_layer)
+        # Defining a function for sampling
+        def sampling(args):
+            mean_mu, log_var = args
+            epsilon = K.random_normal(shape=K.shape(mean_mu), mean=0., stddev=1.)
+            return mean_mu + K.exp(log_var / 2) * epsilon
 
-        self.sd_layer = Dense(128, activation="relu")(x)  # should sigmoid
-        self.sd_layer = BatchNormalization()(self.sd_layer)
+            # Using a Keras Lambda Layer to include the sampling function as a layer
 
-        # latent_vector = Lambda(self.sampler)([self.mean_layer, self.sd_layer])
-        return Model(self.inp, [self.mean_layer, self.sd_layer], name="VAE_Encoder")
+        # in the model
+        encoder_output = Lambda(sampling, name='encoder_output')([self.mean_layer, self.sd_layer])
+
+        return Model(self.encoder_input, encoder_output, name="VAE_Encoder")
 
     # Building the decoder
     def build_decoder(self):
-        decoder_inp = Input(shape=(128,))
-        x = decoder_inp
-        x = Dense(self.shape[1] * self.shape[2] * self.shape[3], activation="relu")(x)
+        conv_filters = [64, 64, 32, 3]
+        conv_kernel_size = [3, 3, 3, 3]
+        conv_strides = [2, 2, 2, 2]
 
-        x = Reshape((self.shape[1], self.shape[2], self.shape[3]))(x)
+        n_layers = len(conv_filters)
 
-        x = (Conv2DTranspose(32, (3, 3), strides=self.stride, activation="relu", padding="same"))(x)
-        x = BatchNormalization()(x)
+        # Define model input
+        decoder_input = self.decoder_input
 
-        x = (Conv2DTranspose(16, (3, 3), strides=self.stride, activation="relu", padding="same"))(x)
-        x = BatchNormalization()(x)
+        # To get an exact mirror image of the encoder
+        x = Dense(np.prod(self.shape_before_flattening))(decoder_input)
+        x = Reshape(self.shape_before_flattening)(x)
 
-        x = (Conv2DTranspose(8, (3, 3), strides=self.stride, activation="relu", padding="same"))(x)
-        x = BatchNormalization()(x)
+        # Add convolutional layers
+        for i in range(n_layers):
+            x = Conv2DTranspose(filters=conv_filters[i],
+                                kernel_size=conv_kernel_size[i],
+                                strides=conv_strides[i],
+                                padding='same',
+                                name='decoder_conv_' + str(i)
+                                )(x)
 
-        outputs = Conv2DTranspose(3, (3, 3), activation='sigmoid', padding='same', name='decoder_output')(x)
-        # should RELU
+            # Adding a sigmoid layer at the end to restrict the outputs
+            # between 0 and 1
+            if i < n_layers - 1:
+                x = LeakyReLU()(x)
+            else:
+                x = Activation('sigmoid')(x)
 
-        return Model(decoder_inp, outputs, name="VAE_Decoder")
+        # Define model output
+        self.decoder_output = x
+
+        return Model(decoder_input, self.decoder_output, name="VAE_Decoder")
 
     def build_autoencoder(self):
         self.encoder = self.build_encoder()
         self.decoder = self.build_decoder()
 
-        self.autoencoder = Model(self.inp, self.decoder(self.encoder(self.inp)), name="Variational_Auto_Encoder")
+        # Input to the combined model will be the input to the encoder.
+        # Output of the combined model will be the output of the decoder.
+        self.autoencoder = Model(self.encoder_input, self.decoder(self.encoder(self.encoder_input)),
+                                 name="Variational_Auto_Encoder")
 
-        self.autoencoder.compile(optimizer="adam", loss=self.vae_loss, metrics=["accuracy"],
+        self.autoencoder.compile(optimizer=self.adam_optimizer, loss=self.total_loss,
+                                 metrics=[self.r_loss, self.kl_loss],
                                  experimental_run_tf_function=False)
+        self.autoencoder.summary()
 
         if os.path.exists(self.model_name + ".h5"):
             self.autoencoder.load_weights(self.model_name + ".h5")  # Loading pre-trained weights
+            print("===Loaded model weights===")
+
+
+        if os.path.exists(self.save_dir + 'model_best_weights.h5'):
+            self.autoencoder.load_weights(self.save_dir + 'model_best_weights.h5')
+            print("===Loaded best model===")
 
         return self.autoencoder
 
     def train(self):
 
-        imgs = glob.glob(self.data_dir + "/*.jpg")
-        print('='*20)
-        print("[+] found ", len(imgs), " images in database\nloading images...")
+        filenames = np.array(glob.glob(os.path.join(self.data_dir, '*/*.jpg')))
+        NUM_IMAGES = len(filenames)
+        print("Total number of images : " + str(NUM_IMAGES))
 
-        train_y = []
-        train_y2 = []
+        data_flow = ImageDataGenerator(rescale=1. / 255).flow_from_directory(self.data_dir,
+                                                                             target_size=self.input_shape[:2],
+                                                                             batch_size=self.batch_size,
+                                                                             shuffle=True,
+                                                                             class_mode='input',
+                                                                             subset='training'
+                                                                             )
 
-        load_time = time.Time()
-        for _ in range(0, self.sample_size):
-            if _ % 500 == 0:
-                print("[{}%]  {} / {}".format(_//self.sample_size*100, _, self.sample_size), end="\r")
-            img = cv2.imread(imgs[_])
-            img = cv2.resize(img, (32, 32), interpolation=cv2.INTER_AREA)
-            train_y.append(img.astype("float32") / 255.0)
+        self.autoencoder.fit_generator(data_flow,
+                                       shuffle=True,
+                                       epochs=self.epochs,
+                                       initial_epoch=0,
+                                       steps_per_epoch=NUM_IMAGES // (self.batch_size**2),
+                                       callbacks=[self.checkpoint_callback]
+                                       )
 
-        print("[+] done loading trainY1 - took {:f.2} seconds".format(load_time - time.Time()))
+        self.autoencoder.save_weights(self.save_dir + self.model_name + ".h5")
 
-        load_time = time.Time()
-        for _ in range(self.sample_size, self.sample_size * 2):
-            if _ % 500 == 0:
-                print("[{}%]  {} / {}".format(_//(self.sample_size*2)*100, _, self.sample_size*2), end="\r")
-            img = cv2.imread(imgs[_])
-            img = cv2.resize(img, (32, 32), interpolation=cv2.INTER_AREA)
-            train_y2.append(img.astype("float32") / 255.0)
-
-        print("[+] done loading trainY2 - took {:f.2} seconds".format(load_time - time.Time()))
-
-        train_y = np.array(train_y)
-        train_y2 = np.array(train_y2)
-        Y_data = np.vstack((train_y, train_y2))
-        del train_y, train_y2
-        gc.collect()
-        print("Virtual memory: ", psutil.virtual_memory())
-        Z_data = copy.deepcopy(Y_data)
-        Z_data = (Z_data - Z_data.mean()) / Z_data.std()
-        print("===Starting Training===\n")
-        self.autoencoder.fit(Z_data, Y_data, batch_size=self.batch_size, epochs=self.epochs, validation_split=0)
-
-        test_Y = []
-
-        load_time = time.Time()
-        for _ in range(200000, 202599):
-            if _ % 500 == 0:
-                print("{} / 100000".format(_), end='\r')
-            img = cv2.imread(imgs[_])
-            img = cv2.resize(img, (32, 32), interpolation=cv2.INTER_AREA)
-            test_Y.append(img.astype("float32") / 255.0)
-
-        print("[+] done loading test - took {:f.2} seconds".format(load_time - time.Time()))
-
-        test_Y = np.array(test_Y)
-        mean = test_Y.mean()
-        std = test_Y.std()
-        test_Z = (test_Y - mean) / std
-
-        pred = self.autoencoder.predict(test_Z)
-        temp = r(0, 2599)
-        print(temp)
-        plt.subplot(1, 3, 1)
-        plt.imshow(test_Y[temp])
-        plt.subplot(1, 3, 2)
-        plt.imshow(test_Z[temp])
-        plt.subplot(1, 3, 3)
-        plt.imshow(pred[temp])
-        cv2.imshow("generated", pred[temp])
-
-        # if os.path.exists()
-        self.autoencoder.save_weights(self.model_name + ".h5")
+    # def train(self):
+    #
+    #     imgs = glob.glob(self.data_dir + "/*.jpg")
+    #     print('='*20)
+    #     print("[+] found ", len(imgs), " images in database\nloading images...")
+    #
+    #     train_y = []
+    #     train_y2 = []
+    #
+    #     load_time = time.time()
+    #     for _ in range(0, self.sample_size):
+    #         if _ % 500 == 0:
+    #             print("[{}%]  {} / {}".format(_//self.sample_size*100, _, self.sample_size), end="\r")
+    #         img = cv2.imread(imgs[_])
+    #         img = cv2.resize(img, (128, 128), interpolation=cv2.INTER_AREA)
+    #         train_y.append(img.astype("float32") / 255.0)
+    #
+    #     print("[+] done loading trainY1 - took {:.2f} seconds".format(load_time - time.time()))
+    #
+    #     load_time = time.time()
+    #     for _ in range(self.sample_size, self.sample_size * 2):
+    #         if _ % 500 == 0:
+    #             print("[{}%]  {} / {}".format(_//(self.sample_size*2)*100, _, self.sample_size*2), end="\r")
+    #         img = cv2.imread(imgs[_])
+    #         img = cv2.resize(img, (128, 128), interpolation=cv2.INTER_AREA)
+    #         train_y2.append(img.astype("float32") / 255.0)
+    #
+    #     print("[+] done loading trainY2 - took {:.2f} seconds".format(load_time - time.time()))
+    #
+    #     train_y = np.array(train_y)
+    #     train_y2 = np.array(train_y2)
+    #     Y_data = np.vstack((train_y, train_y2))
+    #     del train_y, train_y2
+    #     gc.collect()
+    #     print("Virtual memory: ", psutil.virtual_memory())
+    #     Z_data = copy.deepcopy(Y_data)
+    #     Z_data = (Z_data - Z_data.mean()) / Z_data.std()
+    #     print("===Starting Training===\n")
+    #     self.autoencoder.fit(Z_data.values, Y_data.values, batch_size=self.batch_size, epochs=self.epochs, validation_split=0)
+    #
+    #     test_Y = []
+    #
+    #     load_time = time.time()
+    #     for _ in range(200000, 202599):
+    #         if _ % 500 == 0:
+    #             print("{} / 100000".format(_), end='\r')
+    #         img = cv2.imread(imgs[_])
+    #         img = cv2.resize(img, (128, 128), interpolation=cv2.INTER_AREA)
+    #         test_Y.append(img.astype("float32") / 255.0)
+    #
+    #     print("[+] done loading test - took {:.2f} seconds".format(load_time - time.time()))
+    #
+    #     test_Y = np.array(test_Y)
+    #     mean = test_Y.mean()
+    #     std = test_Y.std()
+    #     test_Z = (test_Y - mean) / std
+    #
+    #     pred = self.autoencoder.predict(test_Z)
+    #     temp = r(0, 2599)
+    #     print(temp)
+    #     plt.subplot(1, 3, 1)
+    #     plt.imshow(test_Y[temp])
+    #     plt.subplot(1, 3, 2)
+    #     plt.imshow(test_Z[temp])
+    #     plt.subplot(1, 3, 3)
+    #     plt.imshow(pred[temp])
+    #     cv2.imshow("generated", pred[temp])
+    #
+    #     # if os.path.exists()
+    #     self.autoencoder.save_weights(self.model_name + ".h5")
 
     def generate(self, image=None):
         if image is None:
-            img = np.random.normal(size=(9, 32, 32, 3))
+            img = np.random.normal(size=(9, 128, 128, 3))
 
             prediction = self.autoencoder.predict(img)
             op = np.vstack((np.hstack((prediction[0], prediction[1], prediction[2])),
                             np.hstack((prediction[3], prediction[4], prediction[5])),
                             np.hstack((prediction[6], prediction[7], prediction[8]))))
             print(op.shape)
-            op = cv2.resize(op, (288, 288), interpolation=cv2.INTER_AREA)
+            op = cv2.resize(op, (1188, 1188), interpolation=cv2.INTER_AREA)
             cv2.imshow("generated", op)
             cv2.imwrite("generated" + str(r(0, 9999)) + ".jpg", (op * 255).astype("uint8"))
 
         else:
-            img = cv2.resize(image, (32, 32), interpolation=cv2.INTER_AREA)
+            img = cv2.resize(image, (128, 128), interpolation=cv2.INTER_AREA)
             img = img.astype("float32") / 255.0
             img = (img - self.mean) / self.std
 
-            pred = self.autoencoder.predict(img.reshape(1, 32, 32, 3))
+            pred = self.autoencoder.predict(img.reshape(1, 128, 128, 3))
             cv2.imshow("prediction", cv2.resize(pred[0], (96, 96), interpolation=cv2.INTER_AREA))
 
         while cv2.waitKey(0) != 27:
