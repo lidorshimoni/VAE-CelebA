@@ -18,19 +18,19 @@ import tensorflow.keras.backend as K
 from random import randint as r
 import glob
 from tensorflow.keras.preprocessing.image import ImageDataGenerator
-
+from tensorflow.keras.utils import plot_model
 import gc
 import psutil
 import copy
 import matplotlib.pyplot as plt
 
 
-class VAE():
+class VAE:
     def __init__(self):
 
-        self.model_name = 'testnewmodel'
-        self.version = ""
-        self.save_dir = self.model_name + "v" + self.version
+        self.model_name = 'test'
+        self.version = "3"
+        self.save_dir = self.model_name + "v" + self.version + "/"
 
         self.data_dir = r"W:\Projects\Done\FDGAN\kiryatgat-1502-fdgan-master\CelebA\img_align_celeba"
         self.log_dir = self.save_dir + "/logs/"
@@ -54,10 +54,10 @@ class VAE():
         self.decoder = None
         self.autoencoder = None
 
-        self.batch_size = 64
-        self.epochs = 50
-        self.input_size = 128
-        self.encoder_output_dim = 200
+        self.batch_size = 256
+        self.epochs = 100
+        self.input_size = 64
+        self.encoder_output_dim = 256
         self.decoder_input = Input(shape=(self.encoder_output_dim,), name='decoder_input')
         self.input_shape = (self.input_size, self.input_size, 3)
         self.encoder_input = Input(shape=self.input_shape, name='encoder_input')
@@ -77,29 +77,34 @@ class VAE():
         #                                  verbose=1)
 
         # self.early_stop_callback = EarlyStopping(monitor='loss', min_delta=0.001, patience=3, mode='min', verbose=1)
-        self.checkpoint_callback = ModelCheckpoint(self.save_dir + 'model_best_weights.h5', monitor='loss', verbose=1,
+        self.checkpoint_callback = ModelCheckpoint(self.save_dir + self.model_name + '_best.h5', monitor='loss', verbose=1,
                                                    save_best_only=True,
                                                    mode='min', period=1)
         # self.tensorboard_callback = keras.callbacks.TensorBoard(log_dir=log_dir)
 
-    # def vae_loss(self, input_img, output):
-    #     # compute the average MSE error, then scale it up, ie. simply sum on all axes
-    #     reconstruction_loss = K.sum(K.square(output - input_img))
-    #     # compute the KL loss
-    #     kl_loss = - 0.5 * K.sum(1 + self.sd_layer - K.square(self.mean_layer) - K.square(K.exp(self.sd_layer)), axis=-1)
-    #     # return the average loss over all images in batch
-    #     total_loss = K.mean(reconstruction_loss + kl_loss)
-    #     return total_loss
+    # def vae_loss(self, input_img, output): # compute the average MSE error, then scale it up, ie. simply sum on all
+    # axes reconstruction_loss = K.sum(K.square(output - input_img)) # compute the KL loss kl_loss = - 0.5 * K.sum(1
+    # + self.sd_layer - K.square(self.mean_layer) - K.square(K.exp(self.sd_layer)), axis=-1) # return the average
+    # loss over all images in batch total_loss = K.mean(reconstruction_loss + kl_loss) return total_loss
 
     def kl_loss(self, y_true, y_pred):
         kl_loss = -0.5 * K.sum(1 + self.sd_layer - K.square(self.mean_layer) - K.exp(self.sd_layer), axis=1)
         return kl_loss
 
-    def total_loss(self, y_true, y_pred):
-        return self.LOSS_FACTOR * self.r_loss(y_true, y_pred) + self.kl_loss(y_true, y_pred)
+    # def r_loss(self, y_true, y_pred):
+    #     return K.mean(K.square(y_true - y_pred), axis=[1, 2, 3])
+    #
 
+    # MSE loosssss
     def r_loss(self, y_true, y_pred):
         return K.mean(K.square(y_true - y_pred), axis=[1, 2, 3])
+
+
+    def total_loss(self, y_true, y_pred):
+        # return self.LOSS_FACTOR * self.r_loss(y_true, y_pred) + self.kl_loss(y_true, y_pred)
+        return K.mean(self.r_loss(y_true, y_pred) + self.kl_loss(y_true, y_pred))
+
+
 
     def sampler(self, layers):
         std_norm = K.random_normal(shape=(K.shape(layers[0])[0], 128), mean=0, stddev=1)
@@ -255,19 +260,25 @@ class VAE():
                                  name="Variational_Auto_Encoder")
 
         self.autoencoder.compile(optimizer=self.adam_optimizer, loss=self.total_loss,
-                                 metrics=[self.r_loss, self.kl_loss],
+                                 metrics=[self.total_loss],
+                                 # metrics=[self.r_loss, self.kl_loss],
                                  experimental_run_tf_function=False)
         self.autoencoder.summary()
 
-        if os.path.exists(self.model_name + ".h5"):
-            self.autoencoder.load_weights(self.model_name + ".h5")  # Loading pre-trained weights
-            print("===Loaded model weights===")
+        if os.path.exists(self.save_dir):
+            if os.path.exists(self.save_dir + self.model_name + ".h5"):
+                self.autoencoder.load_weights(self.save_dir + self.model_name + ".h5")  # Loading pre-trained weights
+                print("===Loaded model weights===")
+            if os.path.exists(self.save_dir + self.model_name + '_best.h5'):
+                self.autoencoder.load_weights(self.save_dir + self.model_name + '_best.h5')
+                print("===Loaded best model===")
+        else:
+            os.makedirs(self.save_dir)
 
-
-        if os.path.exists(self.save_dir + 'model_best_weights.h5'):
-            self.autoencoder.load_weights(self.save_dir + 'model_best_weights.h5')
-            print("===Loaded best model===")
-
+        plot_model(
+            self.autoencoder,
+            to_file="model.png",
+            show_shapes=True)
         return self.autoencoder
 
     def train(self):
@@ -288,7 +299,7 @@ class VAE():
                                        shuffle=True,
                                        epochs=self.epochs,
                                        initial_epoch=0,
-                                       steps_per_epoch=NUM_IMAGES // (self.batch_size**2),
+                                       steps_per_epoch=NUM_IMAGES // (self.batch_size*2),
                                        callbacks=[self.checkpoint_callback]
                                        )
 
@@ -367,24 +378,31 @@ class VAE():
 
     def generate(self, image=None):
         if image is None:
-            img = np.random.normal(size=(9, 128, 128, 3))
+            img = np.random.normal(size=(9, self.input_size, self.input_size, 3))
 
             prediction = self.autoencoder.predict(img)
+
             op = np.vstack((np.hstack((prediction[0], prediction[1], prediction[2])),
                             np.hstack((prediction[3], prediction[4], prediction[5])),
                             np.hstack((prediction[6], prediction[7], prediction[8]))))
             print(op.shape)
-            op = cv2.resize(op, (1188, 1188), interpolation=cv2.INTER_AREA)
+            op = cv2.resize(op, (self.input_size*9, self.input_size*9), interpolation=cv2.INTER_AREA)
             cv2.imshow("generated", op)
-            cv2.imwrite("generated" + str(r(0, 9999)) + ".jpg", (op * 255).astype("uint8"))
+            cv2.imwrite(self.sample_dir + "generated" + str(r(0, 9999)) + ".jpg", (op * 255).astype("uint8"))
 
         else:
-            img = cv2.resize(image, (128, 128), interpolation=cv2.INTER_AREA)
-            img = img.astype("float32") / 255.0
-            img = (img - self.mean) / self.std
+            img = cv2.imread(image, cv2.IMREAD_UNCHANGED)
+            img = cv2.resize(img, (self.input_size, self.input_size), interpolation=cv2.INTER_AREA)
+            img = img.astype("float32")
+            img=img/255
+            # img = (img - self.mean) / self.std
+            cv2.imshow("prediction", cv2.resize(img/255, (960, 960), interpolation=cv2.INTER_AREA))
 
-            pred = self.autoencoder.predict(img.reshape(1, 128, 128, 3))
-            cv2.imshow("prediction", cv2.resize(pred[0], (96, 96), interpolation=cv2.INTER_AREA))
+            prediction = self.autoencoder.predict(img.reshape(1, self.input_size, self.input_size, 3))
+
+
+            # cv2.imshow("prediction", cv2.resize(prediction[0], (960, 960), interpolation=cv2.INTER_AREA))
+
 
         while cv2.waitKey(0) != 27:
             pass
@@ -407,6 +425,8 @@ def main():
         vae.train()
     elif choice == 'g':
         vae.generate()
+    elif choice == 'g+':
+        vae.generate(image='img.jpg')
 
 
 if __name__ == "__main__":
