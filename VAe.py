@@ -1,5 +1,5 @@
 # Importing necessary packages
-#from __future__ import print_function
+# from __future__ import print_function
 
 import argparse
 import time
@@ -77,7 +77,8 @@ class VAE:
         #                                  verbose=1)
 
         # self.early_stop_callback = EarlyStopping(monitor='loss', min_delta=0.001, patience=3, mode='min', verbose=1)
-        self.checkpoint_callback = ModelCheckpoint(self.save_dir + self.model_name + '_best.h5', monitor='loss', verbose=1,
+        self.checkpoint_callback = ModelCheckpoint(self.save_dir + self.model_name + '_best.h5', monitor='loss',
+                                                   verbose=1,
                                                    save_best_only=True,
                                                    mode='min', period=1)
         # self.tensorboard_callback = keras.callbacks.TensorBoard(log_dir=log_dir)
@@ -99,12 +100,9 @@ class VAE:
     def r_loss(self, y_true, y_pred):
         return K.mean(K.square(y_true - y_pred), axis=[1, 2, 3])
 
-
     def total_loss(self, y_true, y_pred):
         # return self.LOSS_FACTOR * self.r_loss(y_true, y_pred) + self.kl_loss(y_true, y_pred)
         return K.mean(self.r_loss(y_true, y_pred) + self.kl_loss(y_true, y_pred))
-
-
 
     def sampler(self, layers):
         std_norm = K.random_normal(shape=(K.shape(layers[0])[0], 128), mean=0, stddev=1)
@@ -159,13 +157,6 @@ class VAE:
     #     return Model(decoder_inp, outputs, name="VAE_Decoder")
 
     def build_encoder(self):
-        # Clear tensorflow session to reset layer index numbers to 0 for LeakyRelu,
-        # BatchNormalization and Dropout.
-        # Otherwise, the names of above mentioned layers in the model
-        # would be inconsistent
-
-        # global K
-        # K.clear_session()
 
         conv_filters = [32, 64, 64, 64]
         conv_kernel_size = [3, 3, 3, 3]
@@ -207,8 +198,7 @@ class VAE:
             epsilon = K.random_normal(shape=K.shape(mean_mu), mean=0., stddev=1.)
             return mean_mu + K.exp(log_var / 2) * epsilon
 
-            # Using a Keras Lambda Layer to include the sampling function as a layer
-
+        # Using a Keras Lambda Layer to include the sampling function as a layer
         # in the model
         encoder_output = Lambda(sampling, name='encoder_output')([self.mean_layer, self.sd_layer])
 
@@ -299,7 +289,7 @@ class VAE:
                                        shuffle=True,
                                        epochs=self.epochs,
                                        initial_epoch=0,
-                                       steps_per_epoch=NUM_IMAGES // (self.batch_size*2),
+                                       steps_per_epoch=NUM_IMAGES // (self.batch_size * 2),
                                        callbacks=[self.checkpoint_callback]
                                        )
 
@@ -386,7 +376,8 @@ class VAE:
                             np.hstack((prediction[3], prediction[4], prediction[5])),
                             np.hstack((prediction[6], prediction[7], prediction[8]))))
             print(op.shape)
-            op = cv2.resize(op, (self.input_size*9, self.input_size*9), interpolation=cv2.INTER_AREA)
+            op = cv2.resize(op, (self.input_size * 9, self.input_size * 9), interpolation=cv2.INTER_AREA)
+            op = cv2.cvtColor(op, cv2.COLOR_BGR2RGB)
             cv2.imshow("generated", op)
             cv2.imwrite(self.sample_dir + "generated" + str(r(0, 9999)) + ".jpg", (op * 255).astype("uint8"))
 
@@ -394,15 +385,18 @@ class VAE:
             img = cv2.imread(image, cv2.IMREAD_UNCHANGED)
             img = cv2.resize(img, (self.input_size, self.input_size), interpolation=cv2.INTER_AREA)
             img = img.astype("float32")
-            img=img/255
-            # img = (img - self.mean) / self.std
-            cv2.imshow("prediction", cv2.resize(img/255, (960, 960), interpolation=cv2.INTER_AREA))
+            img = img / 255
 
             prediction = self.autoencoder.predict(img.reshape(1, self.input_size, self.input_size, 3))
+            img = cv2.resize(prediction[0][:, :, ::-1], (960, 960), interpolation=cv2.INTER_AREA)
 
+            # op = cv2.cvtColor(op, cv2.COLOR_BGR2RGB)
+            # img = (img - self.mean) / self.std
+            # cv2.imshow("prediction", cv2.resize(img/255, (960, 960), interpolation=cv2.INTER_AREA))
 
-            # cv2.imshow("prediction", cv2.resize(prediction[0], (960, 960), interpolation=cv2.INTER_AREA))
+            cv2.imshow("prediction", img)
 
+            cv2.imwrite(self.sample_dir + "generated" + str(r(0, 9999)) + ".jpg", (img * 255).astype("uint8"))
 
         while cv2.waitKey(0) != 27:
             pass
@@ -426,7 +420,8 @@ def main():
     elif choice == 'g':
         vae.generate()
     elif choice == 'g+':
-        vae.generate(image='img.jpg')
+        # vae.generate(image='img.jpg')
+        vae.generate(image='img2.jpg')
 
 
 if __name__ == "__main__":
