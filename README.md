@@ -14,11 +14,11 @@ Trained on CelebA and anime datasets
 
 
 ### Face 64X64
-![results after 100 epochs](etc/face.jpg "results after 100 epochs" ) 
+![results after 100 epochs](Else/face.jpg "results after 100 epochs" ) 
 
 
 ### Anime 64X64
-![results after 60 epochs](etc/anime.jpg "results after 60 epochs" ) 
+![results after 60 epochs](Else/anime.jpg "results after 60 epochs" ) 
 
 
 ## Running
