@@ -28,11 +28,12 @@ import matplotlib.pyplot as plt
 class VAE:
     def __init__(self):
 
-        self.model_name = 'test'
-        self.version = "3"
+        self.model_name = 'anime'
+        self.version = "1"
         self.save_dir = self.model_name + "v" + self.version + "/"
 
-        self.data_dir = r"W:\Projects\Done\FDGAN\kiryatgat-1502-fdgan-master\CelebA\img_align_celeba"
+        self.data_dir = r"X:\Projects\2DO\anime-faces"
+        # self.data_dir = r"W:\Projects\Done\FDGAN\kiryatgat-1502-fdgan-master\CelebA\img_align_celeba"
         self.log_dir = self.save_dir + "/logs/"
         self.sample_dir = self.save_dir + '/samples/'
         self.test_dir = self.save_dir + '/test/'
@@ -62,9 +63,9 @@ class VAE:
         self.input_shape = (self.input_size, self.input_size, 3)
         self.encoder_input = Input(shape=self.input_shape, name='encoder_input')
 
-        self.data_set = CelebA(output_size=self.input_size, channel=self.input_shape[-1], sample_size=self.sample_size,
-                               batch_size=self.batch_size, crop=True, filter=False, data_dir=self.data_dir,
-                               ignore_image_description=True)
+        # self.data_set = CelebA(output_size=self.input_size, channel=self.input_shape[-1], sample_size=self.sample_size,
+        #                        batch_size=self.batch_size, crop=True, filter=False, data_dir=self.data_dir,
+        #                        ignore_image_description=True)
 
         self.use_batch_norm = True
         self.use_dropout = False
@@ -273,7 +274,8 @@ class VAE:
 
     def train(self):
 
-        filenames = np.array(glob.glob(os.path.join(self.data_dir, '*/*.jpg')))
+        filenames = np.array(glob.glob(os.path.join(self.data_dir, '*/*.png')))
+        # filenames = np.array(glob.glob(os.path.join(self.data_dir, '*/*.jpg')))
         NUM_IMAGES = len(filenames)
         print("Total number of images : " + str(NUM_IMAGES))
 
@@ -367,6 +369,8 @@ class VAE:
     #     self.autoencoder.save_weights(self.model_name + ".h5")
 
     def generate(self, image=None):
+        if not os.path.exists(self.sample_dir):
+            os.makedirs(self.sample_dir)
         if image is None:
             img = np.random.normal(size=(9, self.input_size, self.input_size, 3))
 
