@@ -28,12 +28,14 @@ import matplotlib.pyplot as plt
 class VAE:
     def __init__(self):
 
-        self.model_name = 'anime'
+        self.model_name = 'facetest'
         self.version = "1"
         self.save_dir = self.model_name + "v" + self.version + "/"
 
-        self.data_dir = r"X:\Projects\2DO\anime-faces"
-        # self.data_dir = r"W:\Projects\Done\FDGAN\kiryatgat-1502-fdgan-master\CelebA\img_align_celeba"
+        if 'anime' in self.model_name:
+            self.data_dir = r"X:\Projects\2DO\anime-faces"
+        else:
+            self.data_dir = r"W:\Projects\Done\FDGAN\kiryatgat-1502-fdgan-master\CelebA\img_align_celeba"
         self.log_dir = self.save_dir + "/logs/"
         self.sample_dir = self.save_dir + '/samples/'
         self.test_dir = self.save_dir + '/test/'
@@ -47,16 +49,16 @@ class VAE:
         self.decoder_output = None
         self.stride = 2
 
-        # These are mean and standard deviation values obtained from the celebA dataset used for training
-        self.mean = 0.43810788
-        self.std = 0.29190385
+        # # These are mean and standard deviation values obtained from the celebA dataset used for training
+        # self.mean = 0.43810788
+        # self.std = 0.29190385
 
         self.encoder = None
         self.decoder = None
         self.autoencoder = None
 
         self.batch_size = 256
-        self.epochs = 100
+        self.epochs = 50
         self.input_size = 64
         self.encoder_output_dim = 256
         self.decoder_input = Input(shape=(self.encoder_output_dim,), name='decoder_input')
@@ -69,7 +71,7 @@ class VAE:
 
         self.use_batch_norm = True
         self.use_dropout = False
-        self.LOSS_FACTOR = 10000
+        # self.LOSS_FACTOR = 10000
         self.learning_rate = 0.0005
         self.adam_optimizer = Adam(lr=self.learning_rate)
 
@@ -103,7 +105,7 @@ class VAE:
 
     def total_loss(self, y_true, y_pred):
         # return self.LOSS_FACTOR * self.r_loss(y_true, y_pred) + self.kl_loss(y_true, y_pred)
-        return K.mean(self.r_loss(y_true, y_pred) + self.kl_loss(y_true, y_pred))
+        return K.mean(self.r_loss(y_true, y_pred) + self.kl_loss(y_true, y_pred)-0.001)
 
     def sampler(self, layers):
         std_norm = K.random_normal(shape=(K.shape(layers[0])[0], 128), mean=0, stddev=1)
@@ -251,8 +253,8 @@ class VAE:
                                  name="Variational_Auto_Encoder")
 
         self.autoencoder.compile(optimizer=self.adam_optimizer, loss=self.total_loss,
-                                 metrics=[self.total_loss],
-                                 # metrics=[self.r_loss, self.kl_loss],
+                                 # metrics=[self.total_loss],
+                                 metrics=[self.r_loss, self.kl_loss],
                                  experimental_run_tf_function=False)
         self.autoencoder.summary()
 
@@ -273,9 +275,10 @@ class VAE:
         return self.autoencoder
 
     def train(self):
-
-        filenames = np.array(glob.glob(os.path.join(self.data_dir, '*/*.png')))
-        # filenames = np.array(glob.glob(os.path.join(self.data_dir, '*/*.jpg')))
+        if "anime" in self.data_dir:
+            filenames = np.array(glob.glob(os.path.join(self.data_dir, '*/*.png')))
+        else:
+            filenames = np.array(glob.glob(os.path.join(self.data_dir, '*/*.jpg')))
         NUM_IMAGES = len(filenames)
         print("Total number of images : " + str(NUM_IMAGES))
 
@@ -297,82 +300,23 @@ class VAE:
 
         self.autoencoder.save_weights(self.save_dir + self.model_name + ".h5")
 
-    # def train(self):
-    #
-    #     imgs = glob.glob(self.data_dir + "/*.jpg")
-    #     print('='*20)
-    #     print("[+] found ", len(imgs), " images in database\nloading images...")
-    #
-    #     train_y = []
-    #     train_y2 = []
-    #
-    #     load_time = time.time()
-    #     for _ in range(0, self.sample_size):
-    #         if _ % 500 == 0:
-    #             print("[{}%]  {} / {}".format(_//self.sample_size*100, _, self.sample_size), end="\r")
-    #         img = cv2.imread(imgs[_])
-    #         img = cv2.resize(img, (128, 128), interpolation=cv2.INTER_AREA)
-    #         train_y.append(img.astype("float32") / 255.0)
-    #
-    #     print("[+] done loading trainY1 - took {:.2f} seconds".format(load_time - time.time()))
-    #
-    #     load_time = time.time()
-    #     for _ in range(self.sample_size, self.sample_size * 2):
-    #         if _ % 500 == 0:
-    #             print("[{}%]  {} / {}".format(_//(self.sample_size*2)*100, _, self.sample_size*2), end="\r")
-    #         img = cv2.imread(imgs[_])
-    #         img = cv2.resize(img, (128, 128), interpolation=cv2.INTER_AREA)
-    #         train_y2.append(img.astype("float32") / 255.0)
-    #
-    #     print("[+] done loading trainY2 - took {:.2f} seconds".format(load_time - time.time()))
-    #
-    #     train_y = np.array(train_y)
-    #     train_y2 = np.array(train_y2)
-    #     Y_data = np.vstack((train_y, train_y2))
-    #     del train_y, train_y2
-    #     gc.collect()
-    #     print("Virtual memory: ", psutil.virtual_memory())
-    #     Z_data = copy.deepcopy(Y_data)
-    #     Z_data = (Z_data - Z_data.mean()) / Z_data.std()
-    #     print("===Starting Training===\n")
-    #     self.autoencoder.fit(Z_data.values, Y_data.values, batch_size=self.batch_size, epochs=self.epochs, validation_split=0)
-    #
-    #     test_Y = []
-    #
-    #     load_time = time.time()
-    #     for _ in range(200000, 202599):
-    #         if _ % 500 == 0:
-    #             print("{} / 100000".format(_), end='\r')
-    #         img = cv2.imread(imgs[_])
-    #         img = cv2.resize(img, (128, 128), interpolation=cv2.INTER_AREA)
-    #         test_Y.append(img.astype("float32") / 255.0)
-    #
-    #     print("[+] done loading test - took {:.2f} seconds".format(load_time - time.time()))
-    #
-    #     test_Y = np.array(test_Y)
-    #     mean = test_Y.mean()
-    #     std = test_Y.std()
-    #     test_Z = (test_Y - mean) / std
-    #
-    #     pred = self.autoencoder.predict(test_Z)
-    #     temp = r(0, 2599)
-    #     print(temp)
-    #     plt.subplot(1, 3, 1)
-    #     plt.imshow(test_Y[temp])
-    #     plt.subplot(1, 3, 2)
-    #     plt.imshow(test_Z[temp])
-    #     plt.subplot(1, 3, 3)
-    #     plt.imshow(pred[temp])
-    #     cv2.imshow("generated", pred[temp])
-    #
-    #     # if os.path.exists()
-    #     self.autoencoder.save_weights(self.model_name + ".h5")
+    def eval(self):
+        data_flow = ImageDataGenerator(rescale=1. / 255).flow_from_directory(self.data_dir,
+                                                                             target_size=self.input_shape[:2],
+                                                                             batch_size=self.batch_size,
+                                                                             shuffle=True,
+                                                                             class_mode='input',
+                                                                             subset='training'
+                                                                             )
+        loss = self.autoencoder.evaluate_generator(data_flow, 100)
+        print('total loss: {:.2f} - r_loss: {:.2f} - kl_loss: {:.2f}'.format(loss[0], loss[1], loss[2]))
 
     def generate(self, image=None):
         if not os.path.exists(self.sample_dir):
             os.makedirs(self.sample_dir)
         if image is None:
             img = np.random.normal(size=(9, self.input_size, self.input_size, 3))
+            cv2.imshow("generated", img[0] * 255)
 
             prediction = self.autoencoder.predict(img)
 
@@ -382,8 +326,8 @@ class VAE:
             print(op.shape)
             op = cv2.resize(op, (self.input_size * 9, self.input_size * 9), interpolation=cv2.INTER_AREA)
             op = cv2.cvtColor(op, cv2.COLOR_BGR2RGB)
-            cv2.imshow("generated", op)
-            cv2.imwrite(self.sample_dir + "generated" + str(r(0, 9999)) + ".jpg", (op * 255).astype("uint8"))
+            # cv2.imshow("generated", op)
+            # cv2.imwrite(self.sample_dir + "generated" + str(r(0, 9999)) + ".jpg", (op * 255).astype("uint8"))
 
         else:
             img = cv2.imread(image, cv2.IMREAD_UNCHANGED)
@@ -426,6 +370,8 @@ def main():
     elif choice == 'g+':
         # vae.generate(image='img.jpg')
         vae.generate(image='img2.jpg')
+    elif choice == 'e':
+        vae.eval()
 
 
 if __name__ == "__main__":
